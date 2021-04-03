@@ -34,9 +34,16 @@ for i in range(len(flow) - entry_point):
     previous = flow[entry_point + i - 1]
     stateless = model.predict(previous[np.newaxis, :])[0]
 
+    n = 5
+    previousN = flow[entry_point + i - n]
+    limited = previousN
+    for j in range(n):
+        limited = model.predict(limited[np.newaxis, :])[0]
+
     ground_truth_img = vis(ground_truth)
     state_img = vis(state)
     stateless_img = vis(stateless)
-    concat(concat(ground_truth_img, stateless_img), state_img).save(f"compare_{i:03d}.png")
+    limited_img = vis(limited)
+    concat(concat(concat(ground_truth_img, stateless_img), limited_img), state_img).save(f"compare_{i:03d}.png")
 
     state = model.predict(state[np.newaxis, :])[0]
