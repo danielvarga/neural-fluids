@@ -7,7 +7,7 @@ import operators as ops
 
 
 class Fluid:
-    def __init__(self, shape, viscosity, quantities):
+    def __init__(self, shape, viscosity, quantities, use_sparse=True):
         self.shape = shape
         # Defining these here keeps the code somewhat more readable vs. computing them every time they're needed.
         self.size = np.product(shape)
@@ -28,14 +28,51 @@ class Fluid:
         # has the same shape as self.velocity_field.
         # This makes calculating the advection map as simple as a single vectorized subtraction each frame.
         self.indices = np.dstack(np.indices(self.shape)).reshape(self.size, self.dimensions)
+        print("indices", self.indices.shape)
 
         self.gradient = ops.matrices(shape, ops.differences(1, (1,) * self.dimensions), False)
+        g = self.gradient[0]
+        print("gradient", len(self.gradient), g.shape, type(g), g.data.shape, g.row.shape)
 
         # Both viscosity and pressure equations are just Poisson equations similar to the steady state heat equation.
         laplacian = ops.matrices(shape, ops.differences(1, (2,) * self.dimensions), True)
-        self.pressure_solver = factorized(laplacian)
-        # Making sure I use the sparse version of the identity function here so I don't cast to a dense matrix.
-        self.viscosity_solver = factorized(sp.identity(self.size) - laplacian * viscosity)
+        print("laplacian", laplacian.shape, type(laplacian))
+
+        n = shape[0]
+        '''
+        lap_inv = lap_inv.reshape((n, n, n, n))
+        import matplotlib.pyplot as plt
+        plt.imshow(lap_inv[n // 2, n // 2, :, :])
+        plt.show()
+        '''
+
+        '''
+        L = splu_laplacian.L.toarray().reshape((n, n, n, n))
+        print("L", L.shape)
+        import matplotlib.pyplot as plt
+        plt.imshow(L[n // 2, n // 2, :, :])
+        plt.show()
+        exit()
+        '''
+
+        if use_sparse:
+            from scipy.sparse.linalg import splu
+            splu_laplacian = splu(laplacian)
+            self.pressure_solver = splu_laplacian.solve
+
+            # Making sure I use the sparse version of the identity function here so I don't cast to a dense matrix.
+            self.viscosity_solver = splu(sp.identity(self.size) - laplacian * viscosity).solve
+        else:
+            print("the dense codepath is very slow, it is here strictly for pedagogical reasons.")
+            print("solving dense pressure equation...")
+            lap_inv = np.linalg.inv(laplacian.toarray())
+            self.pressure_solver = lambda x: x.dot(lap_inv)
+            print("done")
+
+            print("solving dense viscosity equation...")
+            visc_inv = np.linalg.inv((sp.identity(self.size) - laplacian * viscosity).toarray())
+            self.viscosity_solver = lambda x: x.dot(visc_inv)
+            print("done")
 
     def advect_diffuse(self):
         # Advection is computed backwards in time as described in Jos Stam's Stable Fluids whitepaper.

@@ -7,3 +7,5 @@ learning to imitate fluid simulations
     python evaluate.py model.mdl corpus.npy
     convert compare_0*.png compare.gif
     convert compare.gif -resize 200%x200% compare2.gif
+
+based on https://github.com/GregTJ/stable-fluids

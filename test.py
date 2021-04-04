@@ -5,7 +5,7 @@ from fluid import Fluid
 
 FRAME_PATH = 'placeholder'
 
-N = 10
+N = 100
 RESOLUTION = N, N
 VISCOSITY = 10 ** -3
 DURATION = 100
@@ -26,7 +26,9 @@ directions = tuple(-circle(p * np.pi * 2 / 3) for p in range(3))
 points = tuple(r * circle(p * np.pi * 2 / 3) + center for p in range(3))
 
 channels = 'r', 'g', 'b'
-fluid = Fluid(RESOLUTION, VISCOSITY, channels)
+fluid = Fluid(RESOLUTION, VISCOSITY, channels, use_sparse=True)
+
+print("starting simulation")
 
 inflow_dye_field = np.zeros((fluid.size, len(channels)))
 inflow_velocity_field = np.zeros_like(fluid.velocity_field)
