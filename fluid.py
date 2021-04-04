@@ -7,7 +7,8 @@ import operators as ops
 
 
 class Fluid:
-    def __init__(self, shape, viscosity, quantities, use_sparse=True):
+    # solver_type can be one of "dense", "sparse" or ("jacobi", iteration_count).
+    def __init__(self, shape, viscosity, quantities, solver_type="sparse"):
         self.shape = shape
         # Defining these here keeps the code somewhat more readable vs. computing them every time they're needed.
         self.size = np.product(shape)
@@ -55,14 +56,14 @@ class Fluid:
         exit()
         '''
 
-        if use_sparse:
+        if solver_type == "dense":
             from scipy.sparse.linalg import splu
             splu_laplacian = splu(laplacian)
             self.pressure_solver = splu_laplacian.solve
 
             # Making sure I use the sparse version of the identity function here so I don't cast to a dense matrix.
             self.viscosity_solver = splu(sp.identity(self.size) - laplacian * viscosity).solve
-        else:
+        elif solver_type == "sparse":
             print("the dense codepath is very slow, it is here strictly for pedagogical reasons.")
             print("solving dense pressure equation...")
             lap_inv = np.linalg.inv(laplacian.toarray())
@@ -73,6 +74,26 @@ class Fluid:
             visc_inv = np.linalg.inv((sp.identity(self.size) - laplacian * viscosity).toarray())
             self.viscosity_solver = lambda x: x.dot(visc_inv)
             print("done")
+        elif solver_type[0] == "jacobi":
+            import scipy
+            laplacian_diag = laplacian.diagonal()
+            laplacian_nondiag = laplacian - scipy.sparse.spdiags(laplacian_diag, 0, laplacian_diag.size, laplacian_diag.size)
+            iterations = solver_type[1]
+
+            viscosity_diag = 1 - laplacian_diag * viscosity
+            viscosity_nondiag = - laplacian_nondiag * viscosity
+
+            def solver(d, lplusu, b, iterations):
+                x = np.zeros(d.shape)
+                for i in range(iterations):
+                    x = (b - lplusu.dot(x)) / d
+                return x
+
+            self.pressure_solver = lambda b: solver(laplacian_diag, laplacian_nondiag, b, iterations)
+            self.viscosity_solver = lambda b: solver(viscosity_diag, viscosity_nondiag, b, iterations)
+
+        else:
+            assert False, f"unknown solver_type {solver_type}"
 
     def advect_diffuse(self):
         # Advection is computed backwards in time as described in Jos Stam's Stable Fluids whitepaper.

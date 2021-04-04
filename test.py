@@ -5,15 +5,15 @@ from fluid import Fluid
 
 FRAME_PATH = 'placeholder'
 
-N = 100
+N = 400
 RESOLUTION = N, N
 VISCOSITY = 10 ** -3
-DURATION = 100
+DURATION = 200
 
-INFLOW_PADDING = 20
+INFLOW_PADDING = N // 5
 INFLOW_DURATION = 0
-INFLOW_RADIUS = 8
-INFLOW_VELOCITY = 2
+INFLOW_RADIUS = N // 20
+INFLOW_VELOCITY = 4
 
 
 def circle(theta):
@@ -26,7 +26,7 @@ directions = tuple(-circle(p * np.pi * 2 / 3) for p in range(3))
 points = tuple(r * circle(p * np.pi * 2 / 3) + center for p in range(3))
 
 channels = 'r', 'g', 'b'
-fluid = Fluid(RESOLUTION, VISCOSITY, channels, use_sparse=True)
+fluid = Fluid(RESOLUTION, VISCOSITY, channels, solver_type=("jacobi", 30))
 
 print("starting simulation")
 
