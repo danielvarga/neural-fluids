@@ -5,7 +5,7 @@ from fluid import Fluid
 
 FRAME_PATH = 'placeholder'
 
-N = 400
+N = 100
 RESOLUTION = N, N
 VISCOSITY = 10 ** -3
 DURATION = 200

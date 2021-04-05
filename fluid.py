@@ -6,9 +6,17 @@ from scipy.sparse.linalg import factorized
 import operators as ops
 
 
+def jacobi_solver(d, lplusu, b, iterations):
+    x = np.ones(d.shape)
+    for i in range(iterations):
+        x = (b - lplusu.dot(x)) / d
+    return x
+
+
 class Fluid:
     # solver_type can be one of "dense", "sparse" or ("jacobi", iteration_count).
     def __init__(self, shape, viscosity, quantities, solver_type="sparse"):
+        self.iteration = 0
         self.shape = shape
         # Defining these here keeps the code somewhat more readable vs. computing them every time they're needed.
         self.size = np.product(shape)
@@ -36,8 +44,8 @@ class Fluid:
         print("gradient", len(self.gradient), g.shape, type(g), g.data.shape, g.row.shape)
 
         # Both viscosity and pressure equations are just Poisson equations similar to the steady state heat equation.
-        laplacian = ops.matrices(shape, ops.differences(1, (2,) * self.dimensions), True)
-        print("laplacian", laplacian.shape, type(laplacian))
+        self.laplacian = ops.matrices(shape, ops.differences(1, (2,) * self.dimensions), True)
+        print("laplacian", self.laplacian.shape, type(self.laplacian))
 
         n = shape[0]
         '''
@@ -56,17 +64,17 @@ class Fluid:
         exit()
         '''
 
-        if solver_type == "dense":
+        if solver_type == "sparse":
             from scipy.sparse.linalg import splu
-            splu_laplacian = splu(laplacian)
+            splu_laplacian = splu(self.laplacian)
             self.pressure_solver = splu_laplacian.solve
 
             # Making sure I use the sparse version of the identity function here so I don't cast to a dense matrix.
-            self.viscosity_solver = splu(sp.identity(self.size) - laplacian * viscosity).solve
-        elif solver_type == "sparse":
+            self.viscosity_solver = splu(sp.identity(self.size) - self.laplacian * viscosity).solve
+        elif solver_type == "dense":
             print("the dense codepath is very slow, it is here strictly for pedagogical reasons.")
             print("solving dense pressure equation...")
-            lap_inv = np.linalg.inv(laplacian.toarray())
+            lap_inv = np.linalg.inv(self.laplacian.toarray())
             self.pressure_solver = lambda x: x.dot(lap_inv)
             print("done")
 
@@ -76,21 +84,15 @@ class Fluid:
             print("done")
         elif solver_type[0] == "jacobi":
             import scipy
-            laplacian_diag = laplacian.diagonal()
-            laplacian_nondiag = laplacian - scipy.sparse.spdiags(laplacian_diag, 0, laplacian_diag.size, laplacian_diag.size)
+            self.laplacian_diag = self.laplacian.diagonal()
+            self.laplacian_nondiag = self.laplacian - scipy.sparse.spdiags(self.laplacian_diag, 0, self.laplacian_diag.size, self.laplacian_diag.size)
             iterations = solver_type[1]
 
-            viscosity_diag = 1 - laplacian_diag * viscosity
-            viscosity_nondiag = - laplacian_nondiag * viscosity
+            self.viscosity_diag = 1 - self.laplacian_diag * viscosity
+            self.viscosity_nondiag = - self.laplacian_nondiag * viscosity
 
-            def solver(d, lplusu, b, iterations):
-                x = np.zeros(d.shape)
-                for i in range(iterations):
-                    x = (b - lplusu.dot(x)) / d
-                return x
-
-            self.pressure_solver = lambda b: solver(laplacian_diag, laplacian_nondiag, b, iterations)
-            self.viscosity_solver = lambda b: solver(viscosity_diag, viscosity_nondiag, b, iterations)
+            self.pressure_solver = lambda b: jacobi_solver(self.laplacian_diag, self.laplacian_nondiag, b, iterations)
+            self.viscosity_solver = lambda b: jacobi_solver(self.viscosity_diag, self.viscosity_nondiag, b, iterations)
 
         else:
             assert False, f"unknown solver_type {solver_type}"
@@ -114,9 +116,50 @@ class Fluid:
             self.quantities[k] = kernel(q)
 
     def project(self):
+        self.iteration += 1
         # Pressure is calculated from divergence which is in turn calculated from the gradient of the velocity field.
         divergence = sum(self.gradient[d].dot(self.velocity_field[..., d]) for d in range(self.dimensions))
         pressure = self.pressure_solver(divergence)
+
+        visualize_pressure = False
+        if visualize_pressure and self.iteration == 10:
+            import matplotlib.pyplot as plt
+            plt.imshow(divergence.reshape(self.shape))
+            plt.axis("off")
+            plt.title("divergence")
+            plt.savefig("divergence.png")
+            for iterations_here in [1, 2, 5, 10, 20, 50, 100, 200, 1000]:
+                pressure = jacobi_solver(self.laplacian_diag, self.laplacian_nondiag, divergence, iterations_here)
+                pressure -= pressure.mean()
+                print("jacobi", iterations_here, "pressure min/max", pressure.min(), pressure.max())
+                plt.imshow(pressure.reshape(self.shape), vmin=-1, vmax=1)
+                plt.title(f"pressure / jacobi solver, {iterations_here} iterations")
+                plt.axis("off")
+                plt.savefig(f"pressure-it-{iterations_here:04d}.png")
+
+            print("starting sparse")
+            from scipy.sparse.linalg import splu
+            splu_laplacian = splu(self.laplacian)
+            sparse_pressure_solver = splu_laplacian.solve
+            sparse_pressure = sparse_pressure_solver(divergence)
+            sparse_pressure -= sparse_pressure.mean()
+            print("sparse min/max", sparse_pressure.min(), sparse_pressure.max())
+            plt.imshow(sparse_pressure.reshape(self.shape), vmin=-1, vmax=1)
+            plt.axis("off")
+            plt.title("pressure / sparse solver")
+            plt.savefig("pressure-sparse.png")
+
+            print("starting dense")
+            lap_inv = np.linalg.inv(self.laplacian.toarray())
+            dense_pressure_solver = lambda x: x.dot(lap_inv)
+            dense_pressure = dense_pressure_solver(divergence)
+            dense_pressure -= dense_pressure.mean()
+            print("dense min/max", dense_pressure.min(), dense_pressure.max())
+            plt.imshow(dense_pressure.reshape(self.shape), vmin=-1, vmax=1)
+            plt.axis("off")
+            plt.title("pressure / dense solver")
+            plt.savefig("pressure-dense.png")
+            exit()
 
         for d in range(self.dimensions):
             self.velocity_field[..., d] -= self.gradient[d].dot(pressure)
