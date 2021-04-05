@@ -26,13 +26,22 @@ def save(fluid):
     return a.astype(np.float32)
 
 
+def save_div_press(fluid):
+    divergence = sum(fluid.gradient[d].dot(fluid.velocity_field[..., d]) for d in range(fluid.dimensions))
+    pressure = fluid.pressure_solver(divergence)
+    divergence = divergence.reshape(*RESOLUTION)
+    pressure = pressure.reshape(*RESOLUTION)
+
+    return np.stack([divergence, pressure])
+
+
 def main():
     center = np.floor_divide(RESOLUTION, 2)
     r = np.min(center) - INFLOW_PADDING
     directions = tuple(-circle(p * np.pi * 2 / 3) for p in range(3))
     points = tuple(r * circle(p * np.pi * 2 / 3) + center for p in range(3))
 
-    fluid = Fluid(RESOLUTION, VISCOSITY, channels)
+    fluid = Fluid(RESOLUTION, VISCOSITY, channels, solver_type=("jacobi", 100))
 
     inflow_dye_field = np.zeros((fluid.size, len(channels)))
     inflow_velocity_field = np.zeros_like(fluid.velocity_field)
@@ -56,7 +65,8 @@ def main():
     for i, k in enumerate(channels):
         fluid.quantities[k] += inflow_dye_field[..., i]
 
-    saves = []
+    states = []
+    div_presses = []
     for frame in range(DURATION):
         # print(f'Computing frame {frame}.')
 
@@ -69,11 +79,15 @@ def main():
         Image.fromarray(rgb).save(f'{FRAME_PATH}_{frame:05d}.png')
 
         fluid.advect_diffuse()
-        saves.append(save(fluid))
+        states.append(save(fluid))
+        div_presses.append(save_div_press(fluid))
 
-    saves = np.array(saves)
+    states = np.array(states)
+    div_presses = np.array(div_presses)
+    print("div_presses.shape", div_presses.shape)
 
-    np.save(open("corpus.npy", "wb"), saves)
+    np.save(open("corpus.npy", "wb"), states)
+    np.save(open("divergence-to-pressure.npy", "wb"), div_presses)
 
 
 main()
